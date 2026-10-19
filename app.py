@@ -40,6 +40,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
+from question_intent import interpret_question, prioritize_queries
 
 # Terminal-only operational logs (no API keys, full user questions or paper text).
 # Each HTTP request gets a short ID so concurrent questions have separate traces.
@@ -491,6 +492,9 @@ period, or related outcome. Explain subgroup limitations, and do NOT generalize
 women to girls, clinical distress to overall mental health, or one subreddit to
 all Reddit users. Separate descriptions of posted content from causal claims about
 social-media exposure. The papers are a limited sample, not a systematic review.
+Honor the question_interpretation research-question type and evidence_goal.
+Descriptive content evidence must not be used to claim causal effects; preserve
+the difference between representation, experiences, prediction and association.
 Only cite source numbers included in the input. Do not add a bibliography, numbered
 headings, lists, or a Sources section. No paragraph without a valid [n] citation.
 If abstracts do not provide enough information, explicitly explain the limitation.
@@ -528,9 +532,9 @@ def extractive_fallback(included: list[dict]) -> str:
     return "Extractive fallback (automated synthesis did not meet citation rules; these are source excerpts): " + " ".join(lines)
 
 
-def synthesize_answer(question: str, included: list[dict], excerpts: list[dict]) -> tuple[str, str]:
+def synthesize_answer(question: str, included: list[dict], excerpts: list[dict], plan: dict | None = None) -> tuple[str, str]:
     """Retry only citation/format errors, never invent sources or bypass screening."""
-    input_text = json.dumps({"question": question, "eligible_papers": excerpts}, ensure_ascii=False)
+    input_text = json.dumps({"question": question, "question_interpretation":plan or {}, "eligible_papers": excerpts}, ensure_ascii=False)
     answer, _ = perplexity_call(instructions=SYNTHESIS_RULES, input_text=input_text, max_tokens=550)
     try:
         return validate_answer(answer, len(included)), "model"
@@ -541,7 +545,7 @@ def synthesize_answer(question: str, included: list[dict], excerpts: list[dict])
         "citation matching a provided eligible paper. No headings, bullet lists, or invented identifiers.")
     try:
         corrected, _ = perplexity_call(instructions=repair_instructions,
-            input_text=json.dumps({"question":question,"eligible_papers":excerpts,"draft_to_repair":answer},ensure_ascii=False),
+            input_text=json.dumps({"question":question,"question_interpretation":plan or {},"eligible_papers":excerpts,"draft_to_repair":answer},ensure_ascii=False),
             max_tokens=550)
         return validate_answer(corrected, len(included)), "repaired"
     except RuntimeError as e:
@@ -598,6 +602,8 @@ def choose_candidates(pool: dict[str,dict], facets:dict, maximum:int=MAX_PAPERS)
 
 RELEVANCE_RULES = """Match each already-LEAF-eligible paper to the RESEARCHER'S QUESTION, not to generic LEAF eligibility.
 Use only supplied title and excerpts. The inclusion gates are final; this step does NOT change them.
+Use question_interpretation to distinguish content, language, prediction, association,
+and causal questions. Do not mark a study Direct if its design cannot answer that type of question.
 Grade each paper: Direct (explicit question topic, named platform and requested population),
 Partial (one explicitly relevant subgroup, period, or related outcome, but cannot answer all parts),
 or Background (does not provide evidence answering the question).
@@ -608,10 +614,10 @@ Reply JSON only: {"papers":[{"pmid":"...","relevance":"Direct|Partial|Background
 """
 
 
-def assess_question_relevance(question: str, included: list[dict]) -> list[dict]:
+def assess_question_relevance(question: str, included: list[dict], plan: dict | None = None) -> list[dict]:
     """Separate question relevance from the independently validated LEAF gates."""
     if not included:return []
-    payload={"question":question,"papers":[{"pmid":p["pmid"],"title":p["title"],
+    payload={"question":question,"question_interpretation":plan or {},"papers":[{"pmid":p["pmid"],"title":p["title"],
              "paper_text":(p.get("abstract") or p["screening_text"])[:3200]} for p in included]}
     progress("RELEVANCE", f"Assessing question fit of {len(included)} gate-eligible papers.")
     result,_=perplexity_call(instructions=RELEVANCE_RULES,input_text=json.dumps(payload,ensure_ascii=False),max_tokens=2500)
@@ -650,8 +656,9 @@ def answer_question(question: str) -> dict:
     facets=question_facets(terms)
     progress("KEYWORDS", f"Extracted: {', '.join(terms)}")
     progress("INTENT", f"Search facets: {json.dumps(facets,sort_keys=True)}")
+    plan=interpret_question(question, terms, facets, perplexity_call, progress)
     attempts=[]; pool={}
-    plans=search_plan(terms)
+    plans=prioritize_queries(search_plan(terms), plan, facets)
     for i,query in enumerate(plans,1):
         progress("SEARCH", f"Strategy {i}/{len(plans)}: {query}")
         found,_=pubmed_search(query)
@@ -665,7 +672,7 @@ def answer_question(question: str) -> dict:
     progress("RANK", f"{len(pool)} unique retrieved; {len(candidates)} selected for gate screening (cap {MAX_PAPERS}).")
     papers=[available_evidence(p) for p in candidates]
     papers=[p for p in papers if p["screening_text"].strip()]
-    result={"question":question,"keywords":terms,"question_facets":facets,"search_attempts":attempts,
+    result={"question":question,"keywords":terms,"question_facets":facets,"question_interpretation":plan,"search_attempts":attempts,
             "pubmed_query":attempts[-1] if attempts else "","fetched_papers":len(papers),
             "candidate_count":len(pool),"screening_cap":MAX_PAPERS,"answer":"","sources":[],
             "screening":[],"relevance":[],"coverage_notes":[],
@@ -682,7 +689,7 @@ def answer_question(question: str) -> dict:
         progress("FINISH","No gate-eligible papers in screened sample.")
         result["answer"]="No retrieved papers passed both LEAF screening gates. That does not mean the broader literature is empty."
         return result
-    assessed=assess_question_relevance(question,included)
+    assessed=assess_question_relevance(question,included,plan)
     result["relevance"]=[{"pmid":p["pmid"],"grade":p["question_relevance"],"reason":p["relevance_reason"]} for p in assessed]
     relevant=[p for p in assessed if p["question_relevance"] in ("Direct","Partial")]
     result["coverage_notes"]=coverage_notes(facets,assessed)
@@ -698,7 +705,7 @@ def answer_question(question: str) -> dict:
     excerpts=[{"number":i,"title":p["title"],"pmid":p["pmid"],"evidence_source":p["evidence_source"],
               "question_relevance":p["question_relevance"],"fit_limit":p["relevance_reason"],"paper_text":p["screening_text"][:3900]} for i,p in enumerate(included,1)]
     progress("SUMMARY", f"Synthesizing {len(sources)} question-relevant papers; reporting coverage limitations.")
-    answer, summary_mode=synthesize_answer(question,included,excerpts)
+    answer, summary_mode=synthesize_answer(question,included,excerpts,plan)
     result.update({"answer":answer,"sources":sources,"summary_mode":summary_mode})
     progress("FINISH",f"Completed with {len(sources)} question-relevant sources (mode={summary_mode}).")
     return result
@@ -723,7 +730,8 @@ button:disabled{opacity:.5}a{color:#171717}article{border-top:1px solid #ddd;pad
 <textarea id="question" required maxlength="500" placeholder="How is depression discussed on Reddit?"></textarea>
 <button id="submit" type="submit">Search</button></form>
 <p id="status" role="status" aria-live="polite"></p>
-<section id="results" hidden><h2>Answer</h2><div id="answer" class="answer"></div>
+<section id="results" hidden><details><summary>Question interpretation</summary><pre id="interpretation"></pre></details>
+<h2>Answer</h2><div id="answer" class="answer"></div>
 <p id="coverage" class="small"></p><h2>Sources</h2><div id="sources"></div>
 <details id="graph-section"><summary>Evidence graph</summary>
 <p class="graph-note">Question keywords → screened-in papers → platform mentions. Click a node to inspect it; drag nodes to rearrange. Scroll to zoom. Mentions do not establish studied datasets or HiTOP annotations.</p>
@@ -814,9 +822,11 @@ $('form').addEventListener('submit',async ev=>{
   showCitedAnswer(data.answer,data.sources);$('sources').replaceChildren();
   if(!data.sources.length)$('sources').append(t('p','No eligible sources.'));
   for(const s of data.sources){const p=t('article','');const a=t('a',`[${s.number}] ${s.title} (${s.year||'n.d.'})`);a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';p.append(a);p.append(t('p',`PMID: ${s.pmid}${s.doi?' · DOI: '+s.doi:''}`));$('sources').append(p)}
+  const interp=data.question_interpretation||{};
+  $('interpretation').textContent=interp.category ? (`LEAF category: ${interp.category} (${interp.question_form})\nResearch focus: ${interp.interpretation}\nSearch words: ${(interp.priority_keywords||[]).join(', ')}\n${interp.ambiguous ? 'Possible ambiguity: '+interp.clarification_note+'\n' : ''}Interpretation method: ${interp.method}`) : 'Not available';
   renderGraph('evidence-graph','evidence-info',data.graph);
   $('coverage').textContent=(data.coverage_notes||[]).join(' ');
-  $('audit').textContent=JSON.stringify({keywords:data.keywords,question_facets:data.question_facets,screening_cap:data.screening_cap,pubmed_query:data.pubmed_query,candidate_count:data.candidate_count,fetched:data.fetched_papers,search_attempts:data.search_attempts,relevance:data.relevance||[],screening:data.screening.map(({abstract,screening_text,...record})=>record),limitations:data.limitations},null,2);
+  $('audit').textContent=JSON.stringify({question_interpretation:data.question_interpretation,keywords:data.keywords,question_facets:data.question_facets,screening_cap:data.screening_cap,pubmed_query:data.pubmed_query,candidate_count:data.candidate_count,fetched:data.fetched_papers,search_attempts:data.search_attempts,relevance:data.relevance||[],screening:data.screening.map(({abstract,screening_text,...record})=>record),limitations:data.limitations},null,2);
   $('results').hidden=false;$('status').textContent='';
  }catch(e){$('status').textContent=e.message;}finally{$('submit').disabled=false;}
 });
@@ -1041,15 +1051,17 @@ class Tests(unittest.TestCase):
         v1=json.dumps({"papers":[{"pmid":"123","decision":"Yes","reason":"Mental health"}]})
         v2=json.dumps({"papers":[{"pmid":"123","decision":"Yes","reason":"Posts"}]})
         relevance=json.dumps({"papers":[{"pmid":"123","relevance":"Direct","reason":"Matches question."}]})
+        interpretation=json.dumps({"category":"Content Analysis","secondary_categories":[],"question_form":"Description","evidence_goal":"describe_content","interpretation":"How Reddit users discuss depression","priority_keywords":["reddit","depression"],"ambiguous":False,"clarification_note":""})
         with patch(__name__+".pubmed_search",return_value=(papers,"test")) as find, \
              patch(__name__+".available_evidence",side_effect=lambda p:dict(p,screening_text=p["abstract"],evidence_source="PubMed abstract")), \
-             patch(__name__+".perplexity_call",side_effect=[(v1,{})]*3+[(v2,{})]*3+[(relevance,{})]+[("On Reddit, discussions vary [1].",{})]) as fn:
+             patch(__name__+".perplexity_call",side_effect=[(interpretation,{})]+[(v1,{})]*3+[(v2,{})]*3+[(relevance,{})]+[("On Reddit, discussions vary [1].",{})]) as fn:
             result=answer_question("How is depression talked about on reddit?")
         self.assertEqual(result["keywords"],["depression","reddit"])
         self.assertTrue(all("reddit[" in x and "depression[" in x for x in result["search_attempts"]))
         self.assertEqual([s["pmid"] for s in result["sources"]],["123"])
         self.assertEqual(result["fetched_papers"],1)
-        self.assertEqual(fn.call_count,8)
+        self.assertEqual(fn.call_count,9)
+        self.assertEqual(result["question_interpretation"]["category"], "Content Analysis")
         self.assertEqual({n["id"] for n in result["graph"]["nodes"] if n["type"]=="paper"},{"paper:123"})
 
 
@@ -1124,6 +1136,62 @@ class Tests(unittest.TestCase):
         self.assertTrue(any("'girls'" in note for note in notes))
         self.assertTrue(any("cannot be generalized" in note for note in notes))
 
+    def test_question_type_uses_our_leaf_taxonomy(self):
+        from question_intent import interpret_question
+        q="How is depression discussed on Reddit?"
+        terms=keyword_terms(q);facets=question_facets(terms)
+        ai=json.dumps({"category":"Content Analysis","secondary_categories":[],
+                       "question_form":"Description","evidence_goal":"describe_content",
+                       "interpretation":"Themes in Reddit discussion about depression",
+                       "priority_keywords":["reddit","depression"],"ambiguous":False,"clarification_note":""})
+        with patch(__name__+".perplexity_call",return_value=(ai,{})) as ai_call:
+            plan=interpret_question(q,terms,facets,ai_call,progress)
+        self.assertEqual(plan["category"],"Content Analysis")
+        self.assertEqual(plan["question_form"],"Description")
+        self.assertEqual(plan["method"],"perplexity_question_interpretation")
+        self.assertIn("depression",plan["priority_keywords"])
+        self.assertIn("reddit",plan["priority_keywords"])
+
+    def test_question_type_blocks_invented_search_words(self):
+        from question_intent import interpret_question
+        q="How is mental health portrayed on Instagram among women and girls?"
+        terms=keyword_terms(q);facets=question_facets(terms)
+        invalid=json.dumps({"category":"Content Analysis","secondary_categories":[],
+                       "question_form":"Description","evidence_goal":"describe_content",
+                       "interpretation":"Content depictions","priority_keywords":["instagram","schizophrenia"],
+                       "ambiguous":False,"clarification_note":""})
+        with patch(__name__+".perplexity_call",return_value=(invalid,{})):
+            plan=interpret_question(q,terms,facets,perplexity_call,progress)
+        self.assertEqual(plan["method"],"heuristic_fallback")
+        self.assertNotIn("schizophrenia",plan["priority_keywords"])
+        self.assertIn("girls",plan["priority_keywords"])
+        self.assertIn("women",plan["priority_keywords"])
+
+    def test_question_form_changes_evidence_goal(self):
+        from question_intent import heuristic_intent
+        questions=[
+          ("What do people post about depression on Reddit?","Content Analysis","describe_content"),
+          ("Does Instagram cause anxiety in teenage girls?","Behavior/Risk","causal_effects"),
+          ("Can Reddit posts predict depression?","Detection/Prediction","predict_outcomes"),
+          ("How accurate is ADHD information on TikTok?","Stigma/Misinformation","content_accuracy"),
+          ("How do Reddit support communities respond to people seeking help?","Social Support","social_support"),
+        ]
+        for q,category,goal in questions:
+            plan=heuristic_intent(q,keyword_terms(q),question_facets(keyword_terms(q)))
+            self.assertEqual((plan["category"],plan["evidence_goal"]),(category,goal),q)
+
+    def test_question_plan_reorders_without_inventing_search_terms(self):
+        from question_intent import prioritize_queries
+        q="What do women and girls post on Instagram about mental health?"
+        terms=keyword_terms(q);facets=question_facets(terms)
+        base=search_plan(terms)
+        plan={"priority_keywords":["instagram","mental","health","girls"]}
+        ordered=prioritize_queries(base,plan,facets)
+        self.assertEqual(set(ordered),set(base))
+        self.assertTrue(all("instagram[" in x for x in ordered))
+        self.assertIn("mental[",ordered[0])
+        self.assertIn("health[",ordered[0])
+
     def test_invalid_question_fit_fails_closed(self):
         p={"pmid":"1","title":"Reddit and mental health","abstract":"A Reddit study","screening_text":"A Reddit study"}
         with patch(__name__+".perplexity_call",return_value=('"fine"',{})):
@@ -1138,6 +1206,6 @@ if __name__ == "__main__":
         host, port = "127.0.0.1", int(os.getenv("PORT", "8765"))
         progress("SERVER", f"Research Query running at http://{host}:{port}")
         progress("SERVER", f"Perplexity key: {'configured' if os.getenv('PERPLEXITY_API_KEY', '').strip() else 'MISSING - set PERPLEXITY_API_KEY'}")
-        progress("SERVER", "8 model calls per question (6 gate passes, question relevance, summary), potentially 9 if citations need repair. API usage may incur charges.")
+        progress("SERVER", "9 model calls per question (question interpretation, 6 gate passes, question relevance, summary), potentially 10 if citations need repair. API usage may incur charges.")
         progress("SERVER", "Terminal displays progress and errors. Set LEAF_DEBUG=1 for traceback details. Ctrl+C to stop.")
         ThreadingHTTPServer((host, port), Handler).serve_forever()

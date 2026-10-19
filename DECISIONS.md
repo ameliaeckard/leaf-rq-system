@@ -29,3 +29,37 @@
 **Why:** Avoid selecting a narrow, potentially biased slice of available papers, preserve age/population distinctions, and make the uncertainty and limitations visible rather than representing a selected sample as a full review.
 
 **Limitations/next validation:** A broader PubMed keyword search remains non-exhaustive; no independent human assessment of relevance-grade accuracy has been completed; PMC access is partial; no systematic-review methodology or federated query is implemented. Test with diverse human-written questions and manually review both missed papers and misleadingly included papers. Live Perplexity/API behavior requires testing with a private key. These changes are to the **question-answer prototype**, not proof of improvement in the original 30-paper LEAF human-validation kappa metrics.
+
+## October 19: question-type interpretation before retrieval
+
+**Problem.** Keyword-only retrieval did not consistently distinguish a request
+for content descriptions from questions about sentiment, causal effects,
+prediction, social support, or misinformation. Selecting papers based only on
+platform, population, and health words could produce studies with the right
+subject but the wrong kind of evidence.
+
+**Decision.** Before searching PubMed, classify the user question according to
+the seven LEAFv2 RQ categories, independently record the linguistic question
+form informed by Nielsen et al.'s taxonomy and Cambridge's wh-question grammar,
+and identify the requested evidence goal. Perplexity may select only literal
+search keywords already present in the question. Preserve named platform,
+mental-health topic, and population anchors, reorder the existing search
+strategies, and pass the interpretation to relevance assessment and summary.
+Show the plan in the UI and audit output. If the plan is invalid, use an
+explicitly marked bounded heuristic fallback.
+
+**Why.** Whether the question asks what a platform displays, how users talk,
+what predicts an outcome, or what *causes* an outcome determines the appropriate
+research design. These cannot be answered interchangeably. The existing LEAF
+Gate 1 and Gate 2 continue to govern eligibility; this step does not change
+those definitions or historical validation results.
+
+**Status and limitations.** Implemented and covered by local tests. Question
+classification, retrieval coverage, and claim support have **not** been
+validated with a human-labeled question dataset or a live API evaluation.
+One additional model call per question may increase latency and cost.
+
+**Sources.** Nielsen et al., *A Taxonomy of Questions for Question Generation*
+(https://www.cs.memphis.edu/~vrus/questiongeneration/15-NielsenEtAl-QG08.pdf);
+Cambridge Grammar, *Questions: wh-questions*
+(https://dictionary.cambridge.org/us/grammar/british-grammar/questions-wh-questions).

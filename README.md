@@ -35,7 +35,7 @@ Extracted keywords: `depression`, `reddit` (not `talked`). PubMed queries **neve
 - The result is a short synthesis of papers that pass both gates. The final summary cannot introduce outside web sources; every paragraph requires citations to included PMIDs.
 - The evidence graph visualizes words/papers/mentioned platforms; mentions do not establish verified dataset use or HiTOP classification. Xiaoqian's original graph is not included. For an authorized aggregate-only graph export, set `LEAF_GRAPH_PATH` to a local JSON containing `nodes` and `links`.
 - The 30-paper validation metrics do not automatically validate this new question-specific retrieval and synthesis workflow. Researcher verification is still needed.
-- Live runs require internet access, an API key and may incur **7 model calls** (3 per gate plus one synthesis) per question, plus PubMed/PMC calls. Exact charges depend on usage.
+- Live runs require internet access, an API key and may incur **9 model calls** (question interpretation, 3 per gate, question relevance, and synthesis) per question, plus PubMed/PMC calls. Exact charges depend on usage.
 
 **Safety:** Never commit `.env`, API keys or private participant-level data to the public repository. The local server binds to `127.0.0.1`, not the public network.
 
@@ -61,7 +61,7 @@ Times and counts above are **illustrative**, not actual results. If an upstream 
 
 The answer's numbered references such as `[1]` link directly to the matching paper in the Sources section. Every synthesized paragraph requires at least one citation. If the first Perplexity answer omits citations or references unknown sources, one repair call uses the **same screened-in papers**; if that also fails, LEAF returns clearly labeled short extractive excerpts with citations rather than silently accepting an unsupported answer. When no papers pass both gates, it cannot provide a supported answer and instead exposes the screening log.
 
-A normal question costs 3 Gate 1 calls + 3 Gate 2 calls + 1 summary call (7 model calls); citation repair may require an eighth. Full-text requests and PubMed queries also take time. This is still a research prototype: neither keyword retrieval nor machine screening alone establishes comprehensive coverage or methodological validation.
+A normal question costs 1 question interpretation call + 3 Gate 1 calls + 3 Gate 2 calls + 1 question relevance call + 1 summary call (9 model calls); citation repair may require a tenth. Full-text requests and PubMed queries also take time. This is still a research prototype: neither keyword retrieval nor machine screening alone establishes comprehensive coverage or methodological validation.
 
 ## Broad questions and representative evidence (October 19 revision)
 
@@ -71,4 +71,46 @@ The app now groups **only user-stated terms** into platform, health topic, popul
 
 After the existing three-vote Gate 1/Gate 2 decisions, **one separate Perplexity question-relevance assessment** grades eligible papers Direct, Partial, or Background. Only Direct and Partial papers are allowed into the summary. This additional grade **does not modify** Gate 1, Gate 2, or the LEAF research corpus. A coverage note warns when a requested group is absent and explicitly distinguishes adult women from girls. Research-specific subgroup evidence must never be presented as representative of an entire platform. The Methods section now shows extracted facets, search attempts, pool size, capped sample, vote audit, relevance grades and limitations.
 
-**Research limitation:** This improves discovery breadth but is still **PubMed-only, keyword-dependent, and capped**, not a systematic or representative synthesis. True “social media affects mental health” questions may require longitudinal, comparison-group or causal evidence, which descriptive content analyses do not establish. Other bibliographic databases, controlled-vocabulary expansion, human assessment of retrieval relevance, and the federated graph remain future work. Each question normally makes eight model calls (six screening, one question relevance, one synthesis), possibly nine for citation repair. You can lower costs using `LEAF_MAX_PAPERS=10` but results will be narrower. The model's relevance grades have not been independently validated.
+**Research limitation:** This improves discovery breadth but is still **PubMed-only, keyword-dependent, and capped**, not a systematic or representative synthesis. True “social media affects mental health” questions may require longitudinal, comparison-group or causal evidence, which descriptive content analyses do not establish. Other bibliographic databases, controlled-vocabulary expansion, human assessment of retrieval relevance, and the federated graph remain future work. Each question normally makes nine model calls (one interpretation, six screening, one relevance, one synthesis), possibly ten for citation repair. You can lower costs using `LEAF_MAX_PAPERS=10` but results will be narrower. The model's relevance grades have not been independently validated.
+
+## Interpreting a question before searching
+
+Before PubMed retrieval, Perplexity now classifies a researcher's question using
+**the seven LEAFv2 research-question categories**: Content Analysis,
+Detection/Prediction, Sentiment/Language Analysis, Stigma/Misinformation,
+Behavior/Risk, Social Support, and Other/Uncategorized. It separately identifies
+a linguistic question form (Description, Method, Explanation, Comparison, or
+Preference) and an evidence goal, such as `describe_content` versus
+`causal_effects`. The linguistic question forms are an *adaptation* of Nielsen et
+al.'s taxonomy of tutoring questions, and wh-word signals are informed by
+Cambridge Grammar. These two sources do **not** validate the LEAF classifier.
+
+The model chooses **priority search words from the question itself** and an
+interpretation of its meaning. The app retains named platforms, health topics,
+and populations if the model overlooks them. PubMed queries are reordered to
+favor the prioritized, anchored concepts; no new diagnoses, demographic groups,
+or platform names may be silently added. The screening gates remain separate.
+Both the chosen LEAF question category and the exact search words are visible
+under **Question interpretation** and in the screening audit. If the AI planner
+returns invalid JSON, an explicitly labeled heuristic fallback is used.
+
+Example distinctions:
+
+| User question | Research question type | Evidence goal |
+| --- | --- | --- |
+| What are people posting about depression on Reddit? | Content Analysis | Describe content |
+| Can Reddit posts predict depression? | Detection/Prediction | Predict outcomes |
+| How accurate are mental-health claims on TikTok? | Stigma/Misinformation | Content accuracy |
+| Does Instagram cause anxiety in teenage girls? | Behavior/Risk | Causal effects (requires stronger study designs) |
+
+This adds **one model call per question**: normally nine total (one question
+interpretation, three per screening gate, one question relevance assessment, and
+one synthesis), potentially ten with citation repair. No real API run has been
+performed without a user's private key. Use `python app.py --test` for local tests.
+
+**References for the interpretation design (not model training):**
+
+- Nielsen, R. D., Buckingham, J., Knoll, G., Marsh, B., & Palen, L. *A Taxonomy of Questions for Question Generation.*
+  https://www.cs.memphis.edu/~vrus/questiongeneration/15-NielsenEtAl-QG08.pdf
+- Cambridge Dictionary, *Questions: wh-questions.*
+  https://dictionary.cambridge.org/us/grammar/british-grammar/questions-wh-questions
