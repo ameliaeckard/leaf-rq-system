@@ -19,3 +19,13 @@
 - **Change:** Linked inline `[n]` citations to the matching PubMed source. A malformed or uncited summary triggers one constrained retry using only the same eligible evidence, followed by a clearly labeled, brief extractive fallback if repair fails.
 - **Rationale:** Make slow, multi-call pipeline behavior inspectable; preserve source traceability rather than treating citation formatting as an unrecoverable failure. No change to PubMed keyword generation, Gate 1, Gate 2, majority voting, or eligibility criteria.
 - **Verification:** Offline deterministic tests, including uncited answer repair, repair failure, and keyword/LEAF screening regression tests. Live API behavior remains to be checked with a local key.
+
+## October 19, 2026 — Broader research question interpretation and retrieval
+
+**Observed failure:** For a question concerning Reddit, women, young girls and mental health, the prior fallback `reddit AND women` retrieved ten papers weighted heavily toward narrow groups (pregnancy, abortion, sexual dysfunction, COVID-19) and lost essential mental-health and age scope. Eligibility screening alone could not distinguish topical research papers from papers that addressed the researcher's actual question. Findings from individual communities appeared broader than the underlying evidence.
+
+**Change:** Introduced explicit question facets (platform, topic, population, age) formed only from question words; multiple complementary queries instead of an all-word prefix fallback; deduplicated pooled retrieval and balanced sampling of named populations (default max 18 papers); a question-relevance assessment after the original Gate 1/Gate 2 screening; and explicit search-coverage warnings. Direct and Partial evidence may support the answer, but Background papers cannot. Screening rules and majority votes are unchanged. The interactive view and terminal expose the separate discovery/relevance decisions.
+
+**Why:** Avoid selecting a narrow, potentially biased slice of available papers, preserve age/population distinctions, and make the uncertainty and limitations visible rather than representing a selected sample as a full review.
+
+**Limitations/next validation:** A broader PubMed keyword search remains non-exhaustive; no independent human assessment of relevance-grade accuracy has been completed; PMC access is partial; no systematic-review methodology or federated query is implemented. Test with diverse human-written questions and manually review both missed papers and misleadingly included papers. Live Perplexity/API behavior requires testing with a private key. These changes are to the **question-answer prototype**, not proof of improvement in the original 30-paper LEAF human-validation kappa metrics.
