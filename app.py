@@ -492,9 +492,12 @@ period, or related outcome. Explain subgroup limitations, and do NOT generalize
 women to girls, clinical distress to overall mental health, or one subreddit to
 all Reddit users. Separate descriptions of posted content from causal claims about
 social-media exposure. The papers are a limited sample, not a systematic review.
-Honor the question_interpretation research-question type and evidence_goal.
-Descriptive content evidence must not be used to claim causal effects; preserve
-the difference between representation, experiences, prediction and association.
+Honor the PRIMARY research purpose from question_interpretation:
+Explicative definitions, Descriptive patterns, Exploratory associations,
+Explanatory causal mechanisms, Theory Research generalizable models,
+Translational practical applications, or Evaluative effectiveness of a solution.
+A descriptive paper cannot prove causation. An intervention proposal is not
+evidence of effectiveness. Old LEAFv2 method tags are SECONDARY.
 Only cite source numbers included in the input. Do not add a bibliography, numbered
 headings, lists, or a Sources section. No paragraph without a valid [n] citation.
 If abstracts do not provide enough information, explicitly explain the limitation.
@@ -602,8 +605,12 @@ def choose_candidates(pool: dict[str,dict], facets:dict, maximum:int=MAX_PAPERS)
 
 RELEVANCE_RULES = """Match each already-LEAF-eligible paper to the RESEARCHER'S QUESTION, not to generic LEAF eligibility.
 Use only supplied title and excerpts. The inclusion gates are final; this step does NOT change them.
-Use question_interpretation to distinguish content, language, prediction, association,
-and causal questions. Do not mark a study Direct if its design cannot answer that type of question.
+Use question_interpretation.category to identify the PRIMARY purpose:
+Explicative defining, Descriptive describing, Exploratory associating,
+Explanatory causal explanation, Theory Research generalizable models,
+Translational practical applications, Evaluative tested effectiveness.
+Do not mark a study Direct if its design cannot answer that purpose.
+The older LEAFv2 topic/method tags are secondary, not purpose categories.
 Grade each paper: Direct (explicit question topic, named platform and requested population),
 Partial (one explicitly relevant subgroup, period, or related outcome, but cannot answer all parts),
 or Background (does not provide evidence answering the question).
@@ -823,7 +830,7 @@ $('form').addEventListener('submit',async ev=>{
   if(!data.sources.length)$('sources').append(t('p','No eligible sources.'));
   for(const s of data.sources){const p=t('article','');const a=t('a',`[${s.number}] ${s.title} (${s.year||'n.d.'})`);a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';p.append(a);p.append(t('p',`PMID: ${s.pmid}${s.doi?' · DOI: '+s.doi:''}`));$('sources').append(p)}
   const interp=data.question_interpretation||{};
-  $('interpretation').textContent=interp.category ? (`LEAF category: ${interp.category} (${interp.question_form})\nResearch focus: ${interp.interpretation}\nSearch words: ${(interp.priority_keywords||[]).join(', ')}\n${interp.ambiguous ? 'Possible ambiguity: '+interp.clarification_note+'\n' : ''}Interpretation method: ${interp.method}`) : 'Not available';
+  $('interpretation').textContent=interp.category ? (`Research purpose: ${interp.category}\nSecondary LEAFv2 tags: ${(interp.secondary_categories||[]).join(', ') || 'none'}\nQuestion form: ${interp.question_form}\nResearch focus: ${interp.interpretation}\nSearch words: ${(interp.priority_keywords||[]).join(', ')}\n${interp.ambiguous ? 'Possible ambiguity: '+interp.clarification_note+'\n' : ''}Interpretation method: ${interp.method}`) : 'Not available';
   renderGraph('evidence-graph','evidence-info',data.graph);
   $('coverage').textContent=(data.coverage_notes||[]).join(' ');
   $('audit').textContent=JSON.stringify({question_interpretation:data.question_interpretation,keywords:data.keywords,question_facets:data.question_facets,screening_cap:data.screening_cap,pubmed_query:data.pubmed_query,candidate_count:data.candidate_count,fetched:data.fetched_papers,search_attempts:data.search_attempts,relevance:data.relevance||[],screening:data.screening.map(({abstract,screening_text,...record})=>record),limitations:data.limitations},null,2);
@@ -1051,7 +1058,7 @@ class Tests(unittest.TestCase):
         v1=json.dumps({"papers":[{"pmid":"123","decision":"Yes","reason":"Mental health"}]})
         v2=json.dumps({"papers":[{"pmid":"123","decision":"Yes","reason":"Posts"}]})
         relevance=json.dumps({"papers":[{"pmid":"123","relevance":"Direct","reason":"Matches question."}]})
-        interpretation=json.dumps({"category":"Content Analysis","secondary_categories":[],"question_form":"Description","evidence_goal":"describe_content","interpretation":"How Reddit users discuss depression","priority_keywords":["reddit","depression"],"ambiguous":False,"clarification_note":""})
+        interpretation=json.dumps({"category":"Descriptive","secondary_categories":[],"question_form":"Description","evidence_goal":"describe_content","interpretation":"How Reddit users discuss depression","priority_keywords":["reddit","depression"],"ambiguous":False,"clarification_note":""})
         with patch(__name__+".pubmed_search",return_value=(papers,"test")) as find, \
              patch(__name__+".available_evidence",side_effect=lambda p:dict(p,screening_text=p["abstract"],evidence_source="PubMed abstract")), \
              patch(__name__+".perplexity_call",side_effect=[(interpretation,{})]+[(v1,{})]*3+[(v2,{})]*3+[(relevance,{})]+[("On Reddit, discussions vary [1].",{})]) as fn:
@@ -1061,7 +1068,7 @@ class Tests(unittest.TestCase):
         self.assertEqual([s["pmid"] for s in result["sources"]],["123"])
         self.assertEqual(result["fetched_papers"],1)
         self.assertEqual(fn.call_count,9)
-        self.assertEqual(result["question_interpretation"]["category"], "Content Analysis")
+        self.assertEqual(result["question_interpretation"]["category"], "Descriptive")
         self.assertEqual({n["id"] for n in result["graph"]["nodes"] if n["type"]=="paper"},{"paper:123"})
 
 
@@ -1136,17 +1143,17 @@ class Tests(unittest.TestCase):
         self.assertTrue(any("'girls'" in note for note in notes))
         self.assertTrue(any("cannot be generalized" in note for note in notes))
 
-    def test_question_type_uses_our_leaf_taxonomy(self):
+    def test_question_type_uses_research_purpose_taxonomy(self):
         from question_intent import interpret_question
         q="How is depression discussed on Reddit?"
         terms=keyword_terms(q);facets=question_facets(terms)
-        ai=json.dumps({"category":"Content Analysis","secondary_categories":[],
+        ai=json.dumps({"category":"Descriptive","secondary_categories":[],
                        "question_form":"Description","evidence_goal":"describe_content",
                        "interpretation":"Themes in Reddit discussion about depression",
                        "priority_keywords":["reddit","depression"],"ambiguous":False,"clarification_note":""})
         with patch(__name__+".perplexity_call",return_value=(ai,{})) as ai_call:
             plan=interpret_question(q,terms,facets,ai_call,progress)
-        self.assertEqual(plan["category"],"Content Analysis")
+        self.assertEqual(plan["category"],"Descriptive")
         self.assertEqual(plan["question_form"],"Description")
         self.assertEqual(plan["method"],"perplexity_question_interpretation")
         self.assertIn("depression",plan["priority_keywords"])
@@ -1156,7 +1163,7 @@ class Tests(unittest.TestCase):
         from question_intent import interpret_question
         q="How is mental health portrayed on Instagram among women and girls?"
         terms=keyword_terms(q);facets=question_facets(terms)
-        invalid=json.dumps({"category":"Content Analysis","secondary_categories":[],
+        invalid=json.dumps({"category":"Descriptive","secondary_categories":[],
                        "question_form":"Description","evidence_goal":"describe_content",
                        "interpretation":"Content depictions","priority_keywords":["instagram","schizophrenia"],
                        "ambiguous":False,"clarification_note":""})
@@ -1170,11 +1177,13 @@ class Tests(unittest.TestCase):
     def test_question_form_changes_evidence_goal(self):
         from question_intent import heuristic_intent
         questions=[
-          ("What do people post about depression on Reddit?","Content Analysis","describe_content"),
-          ("Does Instagram cause anxiety in teenage girls?","Behavior/Risk","causal_effects"),
-          ("Can Reddit posts predict depression?","Detection/Prediction","predict_outcomes"),
-          ("How accurate is ADHD information on TikTok?","Stigma/Misinformation","content_accuracy"),
-          ("How do Reddit support communities respond to people seeking help?","Social Support","social_support"),
+          ("What do people post about depression on Reddit?","Descriptive","describe_content"),
+          ("Why does Instagram content cause anxiety in teenage girls?","Explanatory","causal_effects"),
+          ("Can Reddit posts predict depression?","Theory Research","predict_outcomes"),
+          ("What defines accurate ADHD information on TikTok?","Explicative","content_accuracy"),
+          ("How is Reddit use associated with depression?","Exploratory","associations"),
+          ("How can we apply research to design a moderation tool?","Translational","other"),
+          ("Does an online support intervention improve help seeking?","Evaluative","causal_effects"),
         ]
         for q,category,goal in questions:
             plan=heuristic_intent(q,keyword_terms(q),question_facets(keyword_terms(q)))
@@ -1191,6 +1200,46 @@ class Tests(unittest.TestCase):
         self.assertTrue(all("instagram[" in x for x in ordered))
         self.assertIn("mental[",ordered[0])
         self.assertIn("health[",ordered[0])
+
+
+    def test_primary_purpose_definitions_are_the_supplied_seven(self):
+        from question_intent import LEAF_CATEGORIES, QUESTION_CATEGORIES, LEAFV2_METHOD_TAGS
+        self.assertEqual(LEAF_CATEGORIES,("Explicative","Descriptive","Exploratory",
+            "Explanatory","Theory Research","Translational","Evaluative"))
+        self.assertIn("Definitions",QUESTION_CATEGORIES["Explicative"][1])
+        self.assertIn("causal",QUESTION_CATEGORIES["Explanatory"][1].lower())
+        self.assertIn("Content Analysis",LEAFV2_METHOD_TAGS)
+        self.assertNotIn("Content Analysis",LEAF_CATEGORIES)
+
+    def test_interpretation_primary_and_secondary_are_separate(self):
+        from question_intent import interpret_question
+        question="What mental health themes appear in Reddit posts?"
+        terms=keyword_terms(question);facets=question_facets(terms)
+        def response(category,tags):
+            return json.dumps({"category":category,"secondary_categories":tags,
+                "question_form":"Description","evidence_goal":"describe_content",
+                "interpretation":"Reddit content themes",
+                "priority_keywords":["reddit"],"ambiguous":False,"clarification_note":""})
+        with patch(__name__+".perplexity_call",return_value=(response("Content Analysis",[]),{})):
+            rejected=interpret_question(question,terms,facets,perplexity_call,progress)
+        self.assertEqual(rejected["method"],"heuristic_fallback")
+        with patch(__name__+".perplexity_call",return_value=(response("Descriptive",["Content Analysis"]),{})):
+            accepted=interpret_question(question,terms,facets,perplexity_call,progress)
+        self.assertEqual(accepted["secondary_categories"],["Content Analysis"])
+
+    def test_exploratory_is_not_explanatory(self):
+        from question_intent import heuristic_intent
+        for question, category in [
+            ("What mental health topics appear on Reddit?", "Descriptive"),
+            ("How is Instagram use associated with anxiety?", "Exploratory"),
+            ("Why does exposure cause anxiety?", "Explanatory"),
+            ("What defines a supportive online group?", "Explicative"),
+            ("What general model predicts depression?", "Theory Research"),
+            ("How can we apply research to design a moderation tool?", "Translational"),
+            ("Does a moderation intervention improve mental health support?", "Evaluative")
+        ]:
+            terms=keyword_terms(question)
+            self.assertEqual(heuristic_intent(question,terms,question_facets(terms))["category"],category,question)
 
     def test_invalid_question_fit_fails_closed(self):
         p={"pmid":"1","title":"Reddit and mental health","abstract":"A Reddit study","screening_text":"A Reddit study"}

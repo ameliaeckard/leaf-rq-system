@@ -10,10 +10,19 @@ invent a platform, clinical condition, age range, or population as an anchor.
 import json
 import re
 
-LEAF_CATEGORIES = (
+QUESTION_CATEGORIES = {
+    "Explicative": ("What makes P be P?", "Definitions, concepts, identifying attributes"),
+    "Descriptive": ("What are the characteristics?", "Description, prevalence, patterns, characteristics"),
+    "Exploratory": ("How do factors relate?", "Associations, relationships, discovery of connections/hypotheses"),
+    "Explanatory": ("Why does P cause Q?", "Causes, mechanisms, causal chains"),
+    "Theory Research": ("What rules apply to all P?", "General theories, propositions, predictive/generalizable models"),
+    "Translational": ("How can knowledge be applied?", "Practical methods, tools, interventions, techniques"),
+    "Evaluative": ("Does the solution work?", "Effectiveness, implementation, consequences, program/intervention evaluation"),
+}
+LEAF_CATEGORIES = tuple(QUESTION_CATEGORIES)
+LEAFV2_METHOD_TAGS = (
     "Content Analysis", "Detection/Prediction", "Sentiment/Language Analysis",
-    "Stigma/Misinformation", "Behavior/Risk", "Social Support",
-    "Other/Uncategorized",
+    "Stigma/Misinformation", "Behavior/Risk", "Social Support", "Other/Uncategorized",
 )
 QUESTION_FORMS = ("Description", "Method", "Explanation", "Comparison", "Preference")
 EVIDENCE_GOALS = (
@@ -21,78 +30,92 @@ EVIDENCE_GOALS = (
     "associations", "causal_effects", "social_support", "other",
 )
 
-PLANNING_RULES = """You interpret research questions BEFORE a literature search.
-Use the seven LEAFv2 categories as the PRIMARY research-question taxonomy:
-Content Analysis (describing themes/representations in platform content),
-Detection/Prediction (ML classification/prediction),
-Sentiment/Language Analysis (linguistic patterns, sentiment/topic modeling),
-Stigma/Misinformation (content reliability, stigma, misinformation),
-Behavior/Risk (social-media behaviors, correlations, temporal trends, or possible effects),
-Social Support (peer support, help seeking, community responses),
-Other/Uncategorized (not represented clearly by the above).
-The historical category counts are corpus frequencies, NOT prediction probabilities.
-Independently classify the linguistic question form using the Nielsen et al.
-question families: Description, Method, Explanation, Comparison, Preference.
-Wh-words (what/who/which/when/where/why/how) are grammatical hints, not
-sufficient to decide scientific intent. "How is X discussed" describes content;
-"how does exposure change X" asks about effects. Distinguish WHAT posts say,
-WHAT people experience, and whether exposure CAUSES outcomes.
-Choose an evidence goal from: describe_content, predict_outcomes,
-language_patterns, content_accuracy, associations, causal_effects,
-social_support, other. If multiple meanings materially change the evidence,
-mark ambiguous and explain the interpretation chosen; never silently conflate them.
-Select priority_keywords ONLY from the supplied allowed literal question keywords.
-Do not invent synonyms, diagnoses, populations, platforms, or age ranges.
-Keep both "mental" and "health" when the question says "mental health".
-Do not treat adult women as adolescent girls or platform posts as causal studies.
-Return ONE JSON object with exactly these fields:
-{"category":"Content Analysis|Detection/Prediction|Sentiment/Language Analysis|Stigma/Misinformation|Behavior/Risk|Social Support|Other/Uncategorized",
-"secondary_categories":[],
+PLANNING_RULES = """Interpret a research question BEFORE searching for papers.
+Use exactly these seven PRIMARY research-PURPOSE categories from the supplied table:
+Explicative: What makes P be P? Definitions, concepts, identifying attributes.
+Descriptive: What are the characteristics? Description, prevalence, patterns.
+Exploratory: How do factors relate? Associations, relationships, emerging hypotheses.
+Explanatory: Why does P cause Q? Causes, mechanisms, causal chains.
+Theory Research: What rules apply to all P? General theories, propositions, predictive/generalizable models.
+Translational: How can knowledge be applied? Practical methods, tools, interventions, techniques.
+Evaluative: Does the solution work? Effectiveness, implementation, consequences, program evaluation.
+Explicative means defining something; Explanatory means explaining causality.
+Exploratory association evidence is NOT enough for an Explanatory causal answer.
+Proposed practical applications are NOT proof an intervention works.
+The older LEAFv2 Content Analysis, Detection/Prediction, Sentiment/Language Analysis,
+Stigma/Misinformation, Behavior/Risk, Social Support, Other/Uncategorized are
+OPTIONAL SECONDARY paper method/content tags, not primary question categories.
+The old 256-paper counts are NOT probabilities for the new purpose classes.
+Wh-words are grammatical cues only; classify the actual requested evidence.
+Also mark a secondary linguistic question_form (Description, Method, Explanation,
+Comparison, Preference) and evidence_goal (describe_content, predict_outcomes,
+language_patterns, content_accuracy, associations, causal_effects, social_support, other).
+Return 0-3 older LEAFv2 tags in secondary_categories if useful.
+Select priority_keywords ONLY from allowed literal question keywords. Do not
+invent synonyms, illnesses, age ranges, platforms or populations. Preserve user
+named platforms, mental-health topics and populations in search.
+If ambiguous, explain the chosen focus and competing meaning.
+Return ONE JSON object:
+{"category":"Explicative|Descriptive|Exploratory|Explanatory|Theory Research|Translational|Evaluative",
+"secondary_categories":["optional old LEAFv2 labels"],
 "question_form":"Description|Method|Explanation|Comparison|Preference",
 "evidence_goal":"describe_content|predict_outcomes|language_patterns|content_accuracy|associations|causal_effects|social_support|other",
-"interpretation":"short, specific paraphrase of what is being asked",
-"priority_keywords":["literal", "keywords"],
+"interpretation":"short specific paraphrase",
+"priority_keywords":["only terms from allowed_keywords"],
 "ambiguous":false,
-"clarification_note":"if ambiguous, say what other interpretation is possible; otherwise empty"}
-No outside web search and no claims about retrieved papers.
+"clarification_note":"alternate interpretation if ambiguous; otherwise empty"}
+No external web search and no claims about unsupplied papers.
 """
 
 
 def heuristic_intent(question: str, terms: list[str], facets: dict) -> dict:
-    """Clearly labeled fallback, not a validated classifier."""
-    q = question.lower()
-    if re.search(r"\b(predict|detect|classify|identify.*risk|machine learning|prediction)\b", q):
-        category, goal = "Detection/Prediction", "predict_outcomes"
-    elif re.search(r"\b(misinformation|misleading|stigma|stigmatiz|accuracy|accurate|reliable)\w*\b", q):
-        category, goal = "Stigma/Misinformation", "content_accuracy"
-    elif re.search(r"\b(sentiment|language patterns|linguistic|word choice|words used)\b", q):
-        category, goal = "Sentiment/Language Analysis", "language_patterns"
-    elif re.search(r"\b(peer support|help.seek|support communit|crisis support|responses? to pleas)\w*\b", q):
-        category, goal = "Social Support", "social_support"
-    elif re.search(r"\b(caus(e|es|ed|ing)|impact|effect|affect|influence|risk factor|correlat|associat|relationship|link between)\w*\b", q):
-        category = "Behavior/Risk"
-        goal = "causal_effects" if re.search(r"\b(caus(e|es|ed|ing)|impact|effect|affect|influence)\w*\b", q) else "associations"
+    """Transparent, unvalidated fallback classifier for research PURPOSE."""
+    q=question.lower()
+    def match(pattern):
+        return re.search(pattern,q) is not None
+    if match(r"\b(does|did|has|have)\b.{0,90}\b(work|effective|improve|reduce|help|successful)\b|\b(evaluat\w*|effectiveness|efficacy|intervention outcome|how well)\b"):
+        category="Evaluative"
+    elif match(r"\b(how can|how should|how to|ways to|apply|implement|build|design|develop)\b.{0,120}\b(tool|program|intervention|practice|moderation|methods?|research|knowledge|finding|support|mental|social|sources?)\b"):
+        category="Translational"
+    elif match(r"\b(what (defines|counts as|makes|distinguishes|constitutes|is meant by)|definition of|criteria for|how (is|are) .{0,45} defined)\b"):
+        category="Explicative"
+    elif match(r"\b(why|what causes|what explains|underlying mechanism|causal (pathway|chain)|how does .{0,55} (cause|lead to|produce)|does .{0,50} make .{0,50} feel)\b"):
+        category="Explanatory"
+    elif match(r"\b(generaliz\w*|universal|theor\w*|predictive model|general model|predict across|model that predicts|rules apply|across all populations)\b|\bcan .{0,60} (predict|forecast)\b"):
+        category="Theory Research"
+    elif match(r"\b(associated|association|correlat\w*|relationship|relat\w* to|linked|links? between|connections? between|factors? relate|risk factor|predictors of)\b"):
+        category="Exploratory"
     else:
-        category, goal = "Content Analysis", "describe_content"
-    if re.search(r"\b(compare|comparison|versus| vs\.? |difference|differ)\w*\b", q):
-        form = "Comparison"
-    elif re.search(r"\b(why|cause[sd]?|leads? to|what explains)\b", q):
-        form = "Explanation"
-    elif re.search(r"\b(how (do|to) (i|we|you)\b|steps to|procedure for)\b", q):
-        form = "Method"
-    else:
-        form = "Description"
-    ambiguity = bool(re.search(r"\b(what does|what do) (instagram|reddit|tiktok|facebook|social media) say\b", q))
-    priority = list(dict.fromkeys(facets["platform"] + facets["topic"] + facets["population"] + facets["age"]))
-    priority = [x for x in priority if x in terms]
-    return {
-        "category":category, "secondary_categories":[], "question_form":form,
-        "evidence_goal":goal,
-        "interpretation":question.strip()[:240], "priority_keywords":priority[:8],
-        "ambiguous":ambiguity,
-        "clarification_note":"This may refer to what users post rather than what the platform itself asserts or what exposure causes." if ambiguity else "",
-        "method":"heuristic_fallback",
-    }
+        category="Descriptive"
+    if match(r"\b(compare|comparison|versus|difference|differ\w*)\b"):form="Comparison"
+    elif match(r"\b(why|causes?|leads? to|what explains)\b"):form="Explanation"
+    elif match(r"\b(how (do|to) (i|we|you)\b|steps to|procedure for|apply|implement|design)\b"):form="Method"
+    else:form="Description"
+    if category=="Theory Research":goal="predict_outcomes"
+    elif category=="Explanatory":goal="causal_effects"
+    elif category=="Exploratory":goal="associations"
+    elif category=="Evaluative":goal="causal_effects" if match(r"\b(effect|effective|impact|improv\w*|reduc\w*)\b") else "other"
+    elif match(r"\b(misinformation|misleading|stigma|stigmatiz\w*|accuracy|accurate|reliable)\b"):goal="content_accuracy"
+    elif match(r"\b(sentiment|language patterns|linguistic|word choice)\b"):goal="language_patterns"
+    elif match(r"\b(peer support|help.seek\w*|support communit\w*)\b"):goal="social_support"
+    else:goal="describe_content" if category=="Descriptive" else "other"
+    tags=[]
+    for regex,label in [
+        (r"misinformation|misleading|stigma|accuracy|accurate","Stigma/Misinformation"),
+        (r"predict|detect|classif|model","Detection/Prediction"),
+        (r"sentiment|language|linguistic","Sentiment/Language Analysis"),
+        (r"peer support|help.seek|support communit","Social Support"),
+        (r"effect|affect|risk|correlat|association|behavior","Behavior/Risk")
+    ]:
+        if match(regex):tags.append(label)
+    if not tags and category=="Descriptive":tags.append("Content Analysis")
+    ambiguity=match(r"\b(what does|what do) (instagram|reddit|tiktok|facebook|social media) say\b")
+    priority=list(dict.fromkeys(facets["platform"]+facets["topic"]+facets["population"]+facets["age"]))
+    return {"category":category,"secondary_categories":tags[:3],"question_form":form,
+        "evidence_goal":goal,"interpretation":question.strip()[:240],
+        "priority_keywords":[x for x in priority if x in terms][:9],
+        "ambiguous":ambiguity,"clarification_note":"May refer to what people post, not what the platform claims or exposure causes." if ambiguity else "",
+        "method":"heuristic_fallback"}
 
 
 def interpret_question(question: str, terms: list[str], facets: dict, model_call, log) -> dict:
@@ -113,7 +136,7 @@ def interpret_question(question: str, terms: list[str], facets: dict, model_call
         if plan.get("evidence_goal") not in EVIDENCE_GOALS: raise ValueError("unknown evidence goal")
         extras = plan.get("secondary_categories", [])
         selected = plan.get("priority_keywords", [])
-        if not isinstance(extras,list) or len(extras)>3 or any(x not in LEAF_CATEGORIES for x in extras):
+        if not isinstance(extras,list) or len(extras)>3 or any(x not in LEAFV2_METHOD_TAGS for x in extras):
             raise ValueError("invalid secondary categories")
         if not isinstance(selected,list) or len(selected)>9 or any(not isinstance(x,str) or x not in terms for x in selected):
             raise ValueError("nonliteral keyword detected")
@@ -125,9 +148,9 @@ def interpret_question(question: str, terms: list[str], facets: dict, model_call
         anchors = list(dict.fromkeys(facets["platform"] + facets["topic"] + facets["population"]))
         chosen = list(dict.fromkeys(anchors + selected))
         plan["priority_keywords"] = [x for x in chosen if x in terms][:9]
-        plan["secondary_categories"] = list(dict.fromkeys(x for x in extras if x != plan["category"]))
+        plan["secondary_categories"] = list(dict.fromkeys(extras))
         plan["method"] = "perplexity_question_interpretation"
-        log("QUESTION_TYPE", f"{plan['category']} | {plan['question_form']} | goal={plan['evidence_goal']}")
+        log("QUESTION_TYPE", f"{plan['category']} (research purpose) | older LEAFv2 tags={plan['secondary_categories']} | goal={plan['evidence_goal']}")
         log("LOOKUP_WORDS", ", ".join(plan["priority_keywords"]))
         return plan
     except (ValueError,TypeError,KeyError,RuntimeError,AttributeError) as error:

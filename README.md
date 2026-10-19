@@ -73,44 +73,49 @@ After the existing three-vote Gate 1/Gate 2 decisions, **one separate Perplexity
 
 **Research limitation:** This improves discovery breadth but is still **PubMed-only, keyword-dependent, and capped**, not a systematic or representative synthesis. True “social media affects mental health” questions may require longitudinal, comparison-group or causal evidence, which descriptive content analyses do not establish. Other bibliographic databases, controlled-vocabulary expansion, human assessment of retrieval relevance, and the federated graph remain future work. Each question normally makes nine model calls (one interpretation, six screening, one relevance, one synthesis), possibly ten for citation repair. You can lower costs using `LEAF_MAX_PAPERS=10` but results will be narrower. The model's relevance grades have not been independently validated.
 
-## Interpreting a question before searching
+## Current question-purpose taxonomy (October 19)
 
-Before PubMed retrieval, Perplexity now classifies a researcher's question using
-**the seven LEAFv2 research-question categories**: Content Analysis,
-Detection/Prediction, Sentiment/Language Analysis, Stigma/Misinformation,
-Behavior/Risk, Social Support, and Other/Uncategorized. It separately identifies
-a linguistic question form (Description, Method, Explanation, Comparison, or
-Preference) and an evidence goal, such as `describe_content` versus
-`causal_effects`. The linguistic question forms are an *adaptation* of Nielsen et
-al.'s taxonomy of tutoring questions, and wh-word signals are informed by
-Cambridge Grammar. These two sources do **not** validate the LEAF classifier.
+The PRIMARY research-question categories follow the supplied seven-category
+framework. These describe what the researcher is trying to learn or do.
 
-The model chooses **priority search words from the question itself** and an
-interpretation of its meaning. The app retains named platforms, health topics,
-and populations if the model overlooks them. PubMed queries are reordered to
-favor the prioritized, anchored concepts; no new diagnoses, demographic groups,
-or platform names may be silently added. The screening gates remain separate.
-Both the chosen LEAF question category and the exact search words are visible
-under **Question interpretation** and in the screening audit. If the AI planner
-returns invalid JSON, an explicitly labeled heuristic fallback is used.
-
-Example distinctions:
-
-| User question | Research question type | Evidence goal |
+| Category | Core question | Coding focus |
 | --- | --- | --- |
-| What are people posting about depression on Reddit? | Content Analysis | Describe content |
-| Can Reddit posts predict depression? | Detection/Prediction | Predict outcomes |
-| How accurate are mental-health claims on TikTok? | Stigma/Misinformation | Content accuracy |
-| Does Instagram cause anxiety in teenage girls? | Behavior/Risk | Causal effects (requires stronger study designs) |
+| Explicative | What makes P be P? | Definitions, concepts, identifying attributes |
+| Descriptive | What are the characteristics? | Description, prevalence, patterns |
+| Exploratory | How do factors relate? | Associations, relationships, possible hypotheses |
+| Explanatory | Why does P cause Q? | Causes, mechanisms, causal chains |
+| Theory Research | What rules apply to all P? | Theories, propositions, generalizable/predictive models |
+| Translational | How can this knowledge be applied? | Practical methods, tools, interventions |
+| Evaluative | Does the solution work? | Effectiveness, implementation, consequences |
 
-This adds **one model call per question**: normally nine total (one question
-interpretation, three per screening gate, one question relevance assessment, and
-one synthesis), potentially ten with citation repair. No real API run has been
-performed without a user's private key. Use `python app.py --test` for local tests.
+**Different purpose versus topic/method:** The older LEAFv2 seven labels
+(Content Analysis, Detection/Prediction, Sentiment/Language Analysis,
+Stigma/Misinformation, Behavior/Risk, Social Support, Other/Uncategorized)
+are optional SECONDARY literature method/content tags. The historical
+256-paper category counts apply only to those old labels and must NOT be
+reported as frequencies for the new research-purpose taxonomy.
 
-**References for the interpretation design (not model training):**
+Perplexity now proposes one primary purpose before PubMed retrieval. It also
+returns optional older LEAFv2 labels, a linguistic question form, an evidence
+goal, and priority search words chosen ONLY from the researcher's literal
+question keywords. The application validates the response schema and prevents
+invention of platform, diagnosis, demographic or age terms. It reorders existing
+anchored PubMed searches, but does not silently add new search concepts.
+When the planner fails validation, the app logs and displays a **heuristic
+fallback** rather than claiming successful AI interpretation.
 
-- Nielsen, R. D., Buckingham, J., Knoll, G., Marsh, B., & Palen, L. *A Taxonomy of Questions for Question Generation.*
-  https://www.cs.memphis.edu/~vrus/questiongeneration/15-NielsenEtAl-QG08.pdf
-- Cambridge Dictionary, *Questions: wh-questions.*
-  https://dictionary.cambridge.org/us/grammar/british-grammar/questions-wh-questions
+The primary purpose informs the later paper-relevance and synthesis steps:
+Exploratory associations cannot support Explanatory causal claims; translating
+research into an intervention is not proof that it works; and general models
+need evidence beyond isolated descriptions. LEAF Gate 1 and Gate 2, the three
+independent votes per gate, and answer citations remain unchanged.
+
+**Status:** Implemented and covered by offline software tests. Neither the
+question-purpose accuracy nor retrieval relevance has been independently
+validated using stakeholder-labeled test questions. Live calls still require
+your own private Perplexity API key. A normal run uses nine API calls, possibly
+ten when citation repair is needed.
+
+Background references for SECONDARY grammatical/question-form guidance:
+- https://www.cs.memphis.edu/~vrus/questiongeneration/15-NielsenEtAl-QG08.pdf
+- https://dictionary.cambridge.org/us/grammar/british-grammar/questions-wh-questions

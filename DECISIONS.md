@@ -63,3 +63,26 @@ One additional model call per question may increase latency and cost.
 (https://www.cs.memphis.edu/~vrus/questiongeneration/15-NielsenEtAl-QG08.pdf);
 Cambridge Grammar, *Questions: wh-questions*
 (https://dictionary.cambridge.org/us/grammar/british-grammar/questions-wh-questions).
+
+
+## October 19: Adopt seven primary research-purpose categories
+
+**Change:** The supplied Explicative, Descriptive, Exploratory, Explanatory,
+Theory Research, Translational and Evaluative categories replace the older
+primary question categories. The seven old LEAFv2 labels remain optional
+secondary literature method/topic tags.
+
+**Why:** An analysis method such as Content Analysis does not tell us whether
+the researcher wants definitions, patterns, relationships, causes, generalized
+theory, application, or evaluation. The purpose of a question should influence
+which sources are relevant and which claims are justified.
+
+**What remains unchanged:** Literal question-derived search keywords,
+PubMed/PMC retrieval, the LEAF eligibility gates (three votes each),
+the separate question relevance check, and cited evidence-only summaries.
+The older 256-paper counts cannot be interpreted as a distribution of these
+new purpose labels.
+
+**Status:** Implemented in the question interpreter and locally unit-tested;
+not yet human-adjudicated or verified in live API runs. Human evaluation of
+category choice, search coverage and answer faithfulness is the next step.
