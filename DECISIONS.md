@@ -11,3 +11,11 @@
 **Boundary:** The current prototype does not implement the original extraction and RQ taxonomy stages or Xiaoqian's federated social-media knowledge graph. It is not a new validation of the existing 30-paper study. A live rerun with your own API key and a human quality check is necessary before reporting effectiveness to Jina.
 
 **Tests:** Offline tests cover the failing question, anchored query relaxations, source exclusion, PMC preference/fallback, separate gates, citation checks, and graph access.
+
+## October 19: Terminal visibility and citation recovery
+
+- **Problem observed:** The model sometimes produced a two-paragraph answer with a citation in only the first paragraph. The strict client-side scientific validation rejected the whole answer, and the web page showed a citation error without useful terminal progress.
+- **Change:** Added timestamps, request IDs, step-specific progress/error logs, and screening vote counts to stdout. Upstream errors show the host and status but not the API token or model input. Enabled optional `LEAF_DEBUG=1` traceback output.
+- **Change:** Linked inline `[n]` citations to the matching PubMed source. A malformed or uncited summary triggers one constrained retry using only the same eligible evidence, followed by a clearly labeled, brief extractive fallback if repair fails.
+- **Rationale:** Make slow, multi-call pipeline behavior inspectable; preserve source traceability rather than treating citation formatting as an unrecoverable failure. No change to PubMed keyword generation, Gate 1, Gate 2, majority voting, or eligibility criteria.
+- **Verification:** Offline deterministic tests, including uncited answer repair, repair failure, and keyword/LEAF screening regression tests. Live API behavior remains to be checked with a local key.

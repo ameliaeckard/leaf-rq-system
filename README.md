@@ -38,3 +38,27 @@ Extracted keywords: `depression`, `reddit` (not `talked`). PubMed queries **neve
 - Live runs require internet access, an API key and may incur **7 model calls** (3 per gate plus one synthesis) per question, plus PubMed/PMC calls. Exact charges depend on usage.
 
 **Safety:** Never commit `.env`, API keys or private participant-level data to the public repository. The local server binds to `127.0.0.1`, not the public network.
+
+## Watching a question in the terminal
+
+When you run `python app.py`, the terminal prints timestamped operational messages with a request ID, for example:
+
+```text
+12:00:01 [Q0001] START        New research question received.
+12:00:01 [Q0001] KEYWORDS     Extracted: depression, reddit
+12:00:01 [Q0001] SEARCH       PubMed query: depression[Title/Abstract] AND reddit[Title/Abstract]
+12:00:02 [Q0001] PUBMED       Found 24 record IDs (up to 36).
+12:00:03 [Q0001] EVIDENCE     PMID 12345678: matched PMC full text
+12:00:04 [Q0001] SCREEN       GATE1 pass 1/3 started
+12:00:13 [Q0001] SCREEN       GATE1 pass 1/3 finished: Yes=8, No=2, Uncertain=0
+...
+12:01:22 [Q0001] SUMMARY      Synthesizing evidence from 4 screened-in papers.
+12:01:35 [Q0001] FINISH       Returned answer mode=model, 4 cited sources.
+12:01:35 [Q0001] DONE         Request duration: 94.0s
+```
+
+Times and counts above are **illustrative**, not actual results. If an upstream service fails, its hostname and HTTP status are printed without exposing your key. You can enable a complete Python traceback for unexpected errors with `$env:LEAF_DEBUG="1"` before starting. Logs are written to the terminal only, not saved to disk by the app; the search terms will be visible to anyone looking at the terminal.
+
+The answer's numbered references such as `[1]` link directly to the matching paper in the Sources section. Every synthesized paragraph requires at least one citation. If the first Perplexity answer omits citations or references unknown sources, one repair call uses the **same screened-in papers**; if that also fails, LEAF returns clearly labeled short extractive excerpts with citations rather than silently accepting an unsupported answer. When no papers pass both gates, it cannot provide a supported answer and instead exposes the screening log.
+
+A normal question costs 3 Gate 1 calls + 3 Gate 2 calls + 1 summary call (7 model calls); citation repair may require an eighth. Full-text requests and PubMed queries also take time. This is still a research prototype: neither keyword retrieval nor machine screening alone establishes comprehensive coverage or methodological validation.
